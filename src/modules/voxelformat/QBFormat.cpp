@@ -10,6 +10,7 @@
 #include "io/FileStream.h"
 #include "io/Stream.h"
 #include "voxel/MaterialColor.h"
+#include "voxelformat/SceneGraphNode.h"
 #include "voxelformat/private/PaletteLookup.h"
 
 namespace voxelformat {
@@ -67,9 +68,12 @@ bool QBFormat::saveMatrix(io::SeekableWriteStream& stream, const SceneGraphNode&
 	wrapSave(stream.writeUInt32(size.y));
 	wrapSave(stream.writeUInt32(size.z));
 
-	wrapSave(stream.writeUInt32(region.getLowerX()));
-	wrapSave(stream.writeUInt32(region.getLowerY()));
-	wrapSave(stream.writeUInt32(region.getLowerZ()));
+	const int frame = 0;
+	const SceneGraphTransform &transform = node.transform(frame);
+	const glm::ivec3 offset = glm::round(transform.translation());
+	wrapSave(stream.writeInt32(offset.x));
+	wrapSave(stream.writeInt32(offset.y));
+	wrapSave(stream.writeInt32(offset.z));
 
 	constexpr voxel::Voxel Empty;
 
@@ -200,14 +204,18 @@ bool QBFormat::loadMatrix(State& state, io::SeekableReadStream& stream, SceneGra
 		return false;
 	}
 
-	glm::ivec3 offset(0);
-	wrap(stream.readInt32(offset.x));
-	wrap(stream.readInt32(offset.y));
-	wrap(stream.readInt32(offset.z));
-	Log::debug("Matrix offset: %i:%i:%i", offset.x, offset.y, offset.z);
+	SceneGraphTransform transform;
+	{
+		glm::ivec3 offset(0);
+		wrap(stream.readInt32(offset.x));
+		wrap(stream.readInt32(offset.y));
+		wrap(stream.readInt32(offset.z));
+		Log::debug("Matrix offset: %i:%i:%i", offset.x, offset.y, offset.z);
+		transform.setTranslation(offset);
+	}
 
-	const glm::ivec3 maxs(offset.x + size.x - 1, offset.y + size.y - 1, offset.z + size.z - 1);
-	const voxel::Region region(offset.x, offset.y, offset.z, maxs.x, maxs.y, maxs.z);
+	const glm::ivec3 maxs = glm::ivec3(size) - 1;
+	const voxel::Region region(0, 0, 0, maxs.x, maxs.y, maxs.z);
 	core_assert_msg(region.getDimensionsInVoxels() == glm::ivec3(size),
 			"%i:%i:%i versus %i:%i:%i", region.getDimensionsInVoxels().x, region.getDimensionsInVoxels().y, region.getDimensionsInVoxels().z,
 			size.x, size.y, size.z);
@@ -229,13 +237,14 @@ bool QBFormat::loadMatrix(State& state, io::SeekableReadStream& stream, SceneGra
 			for (uint32_t y = 0; y < size.y; ++y) {
 				for (uint32_t x = 0; x < size.x; ++x) {
 					const voxel::Voxel& voxel = getVoxel(state, stream, palLookup);
-					v->setVoxel(offset.x + (int)x, offset.y + (int)y, offset.z + (int)z, voxel);
+					v->setVoxel((int)x, (int)y, (int)z, voxel);
 				}
 			}
 		}
 		SceneGraphNode node(SceneGraphNodeType::Model);
 		node.setVolume(v, true);
 		node.setName(name);
+		node.setTransform(0, transform, true);
 		node.setPalette(palLookup.palette());
 		sceneGraph.emplace(core::move(node));
 		return true;
@@ -269,7 +278,7 @@ bool QBFormat::loadMatrix(State& state, io::SeekableReadStream& stream, SceneGra
 			for (uint32_t j = 0; j < count; ++j) {
 				const uint32_t x = (index + j) % size.x;
 				const uint32_t y = (index + j) / size.x;
-				v->setVoxel(offset.x + (int)x, offset.y + (int)y, offset.z + (int)z, voxel);
+				v->setVoxel((int)x, (int)y, (int)z, voxel);
 			}
 			index += count;
 		}
@@ -279,6 +288,7 @@ bool QBFormat::loadMatrix(State& state, io::SeekableReadStream& stream, SceneGra
 	node.setVolume(v, true);
 	node.setName(name);
 	node.setPalette(palLookup.palette());
+	node.setTransform(0, transform, true);
 	sceneGraph.emplace(core::move(node));
 	Log::debug("Matrix read");
 	return true;
